@@ -38,12 +38,16 @@ struct Photo
 std::vector<Photo> photos;
 
 int parseImage(const char *fileName, EXIFInfo &result);
-void writeJSON();
 void addPhoto(const char *fileName, EXIFInfo &result);
-void printExifInfo(EXIFInfo &result);
+void printExifInfo(const char *fileName, EXIFInfo &result);
+void writeJSON();
+void writeCSVLine(std::ofstream &csvFile, EXIFInfo &result, const char *fileName);
 
 int main(int argc, const char * argv[])
 {
+    std::ofstream csv_file ("/Users/gr4yscale/code/photo-exif-parsing/resultsCSV.csv", std::ofstream::out);
+    csv_file << "timeStamp,subsectime,fileName,width,height,size,latitude,longitude,elevation,shutterspeed,iso,aperature,iosver,orientation" << std::endl;
+    
     int fileCount = 0;
     
     path p = path("/Volumes/1TB Ext SSD 1/[iphone pix]");
@@ -55,9 +59,12 @@ int main(int argc, const char * argv[])
             path item = *it;
             if (item.extension() == ".JPG") {
                 EXIFInfo result;
-                int retVal = parseImage(item.c_str(), result);
+                const char *fileName;
+                fileName = item.c_str();
+                int retVal = parseImage(fileName, result);
                 if (!retVal) {
-                    printExifInfo(result);
+//                    printExifInfo(fileName, result);
+                    writeCSVLine(csv_file, result, fileName);
                 }
             }
         }
@@ -67,9 +74,13 @@ int main(int argc, const char * argv[])
         }
         *it++;
         fileCount++;
+        
+        if (fileCount > 300) break;
     }
     
 //    writeJSON();
+    
+    csv_file.close();
     return 0;
 }
 
@@ -173,7 +184,7 @@ void addPhoto(const char *fileName, EXIFInfo &result) {
     }
 }
 
-void printExifInfo(EXIFInfo &result) {
+void printExifInfo(const char *fileName, EXIFInfo &result) {
     printf("Camera make       : %s\n", result.Make.c_str());
     printf("Camera model      : %s\n", result.Model.c_str());
     printf("Software          : %s\n", result.Software.c_str());
@@ -211,4 +222,23 @@ void printExifInfo(EXIFInfo &result) {
     printf("GPS Altitude      : %f m\n", result.GeoLocation.Altitude);
     
     printf("----------------------------------------------------------------\n");
+    
+}
+
+void writeCSVLine(std::ofstream &csvFile, EXIFInfo &result, const char *fileName) {
+    csvFile << result.DateTimeOriginal.c_str();
+    csvFile << ',' << result.SubSecTimeOriginal.c_str();
+    csvFile << ',' << fileName;
+    csvFile << ',' << result.ImageWidth;
+    csvFile << ',' << result.ImageHeight;
+    csvFile << ',' << "0";
+    csvFile << ',' << result.GeoLocation.Latitude;
+    csvFile << ',' << result.GeoLocation.Longitude;
+    csvFile << ',' << result.GeoLocation.Altitude;
+    csvFile << ",1.0/" << result.ExposureTime;
+    csvFile << ',' << result.ISOSpeedRatings;
+    csvFile << ',' << result.FNumber;
+    csvFile << ',' << result.Software.c_str();
+    csvFile << ',' << result.Orientation;
+    csvFile << std::endl;
 }
