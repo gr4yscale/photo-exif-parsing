@@ -17,6 +17,7 @@
 #include <boost/date_time/local_time/local_time.hpp>
 #include <boost/filesystem.hpp>
 
+using namespace std;
 using namespace boost::filesystem;
 using namespace boost::gregorian;
 using namespace boost::local_time;
@@ -24,8 +25,9 @@ using namespace boost::posix_time;
 
 struct Photo
 {
-    std::string identifier;
-    std::string fileName;
+    string identifier;
+    string fileName;
+    string timeStamp;
     
     double latitude;
     double longitude;
@@ -35,7 +37,7 @@ struct Photo
     boost::uintmax_t fileSize;
 };
 
-std::vector<Photo> photos;
+vector<Photo> photos;
 
 int parseImage(const char *fileName, EXIFInfo &result);
 void addPhoto(const char *fileName, EXIFInfo &result);
@@ -69,13 +71,42 @@ int main(int argc, const char * argv[])
         }
         catch (filesystem_error &e)
         {
-            std::cerr << e.what() << '\n';
+            cerr << e.what() << '\n';
         }
     }
     
     findBursts();
     
     return 0;
+}
+
+
+void findBursts() {
+    sort (photos.begin(), photos.end(), sortPhotoDate);
+    
+    bool burstHasStarted = false;
+    double numberOfPhotosInBurst = 0;
+    Photo previousPhoto = photos[0];
+    
+    for (vector<Photo>::iterator it=photos.begin(); it!=photos.end(); ++it) {
+        Photo photo = *it;
+        double time = photo.time_taken;
+        double difference = photo.time_taken - previousPhoto.time_taken;
+
+        if (difference < 1.0 && time != -999) {
+            numberOfPhotosInBurst++;
+            if (!burstHasStarted) burstHasStarted = true;
+            printf("[---]:   %s  %f %f  %s \n", previousPhoto.timeStamp.c_str(), difference, numberOfPhotosInBurst, previousPhoto.fileName.c_str());
+        } else {
+            if (burstHasStarted) {
+                burstHasStarted = false;
+                numberOfPhotosInBurst = 0;
+                printf("[XXX]:   %s  %f %f  %s \n", previousPhoto.timeStamp.c_str(), difference, numberOfPhotosInBurst, previousPhoto.fileName.c_str());
+            }
+        }
+
+        previousPhoto = photo;
+    }
 }
 
 int parseImage(const char *fileName, EXIFInfo &result) {
@@ -115,8 +146,8 @@ void addPhoto(const char *fileName, EXIFInfo &result) {
     photo.timeStamp = result.DateTimeOriginal;
     
     local_time_input_facet *input_facet = new local_time_input_facet("%Y-%m-%d %H:%M:%S %ZP");
-    std::stringstream ss;
-    ss.imbue(std::locale(ss.getloc(), input_facet));
+    stringstream ss;
+    ss.imbue(locale(ss.getloc(), input_facet));
     local_date_time dateTimePhotoTaken(not_a_date_time);
     ss.str(photo.timeStamp);
     ss >> dateTimePhotoTaken;
@@ -127,7 +158,7 @@ void addPhoto(const char *fileName, EXIFInfo &result) {
         time_duration durationSince1970 = dateTimePhotoTaken.utc_time() - (ptime)date(1970,1,1);
         photo.time_taken = durationSince1970.total_seconds();
         if (!result.SubSecTimeOriginal.empty()) {
-            photo.time_taken += (std::stod(result.SubSecTimeOriginal) / 1000.0);
+            photo.time_taken += (stod(result.SubSecTimeOriginal) / 1000.0);
         }
     }
 
@@ -165,4 +196,7 @@ void printExifInfo(const char *fileName, EXIFInfo &result) {
     printf("----------------------------------------------------------------\n");
 }
 
+bool sortPhotoDate (Photo a, Photo b) {
+    return a.time_taken < b.time_taken;
 }
+
