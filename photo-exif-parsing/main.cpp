@@ -42,14 +42,17 @@ vector<Photo> photos;
 int parseImage(const char *fileName, EXIFInfo &result);
 void addPhoto(const char *fileName, EXIFInfo &result);
 void printExifInfo(const char *fileName, EXIFInfo &result);
-bool sortPhotoDate (Photo a, Photo b);
+bool sortPhotoByDate (Photo a, Photo b);
 void findBursts();
+void createBurstDirectoryAndMovePhoto(Photo &photo, unsigned long index, stringstream &baseDirSS);
+string sanitizedTimestamp(string &timestamp);
+
 
 int main(int argc, const char * argv[])
 {
     int fileCount = 0;
     
-    path p = path("/Volumes/1TB Ext SSD 1/[iphone pix]");
+    path p = path("/Volumes/1TB Ext SSD 1/[iphone pix] copy");
     directory_iterator it{p};
     
     while (it != directory_iterator{}) {
@@ -63,7 +66,6 @@ int main(int argc, const char * argv[])
                 int retVal = parseImage(fileName, result);
                 if (!retVal) {
                     addPhoto(fileName, result);
-//                    printExifInfo(fileName, result);
                 }
             }
             *it++;
@@ -77,35 +79,88 @@ int main(int argc, const char * argv[])
     
     findBursts();
     
+    printf("***** DONE! *****");
+    
     return 0;
 }
 
 
 void findBursts() {
-    sort (photos.begin(), photos.end(), sortPhotoDate);
+    
+    // we can't properly calculate the difference between timestamps without sorting first!
+    sort (photos.begin(), photos.end(), sortPhotoByDate);
     
     bool burstHasStarted = false;
     double numberOfPhotosInBurst = 0;
+    
+    stringstream burstDirectoryStringStream;
+    vector<Photo> photosToMove;
     Photo previousPhoto = photos[0];
     
     for (vector<Photo>::iterator it=photos.begin(); it!=photos.end(); ++it) {
+        
         Photo photo = *it;
         double time = photo.time_taken;
         double difference = photo.time_taken - previousPhoto.time_taken;
-
-        if (difference < 1.0 && time != -999) {
+        
+        // if the time difference between the last photo in the iteration and the current one is small (1.5) we know it was a burst.
+        // hypothetically. there is still the issue of frames dropping when the phone gets slow, but this is unavoidable.
+        // -999 is for images we can't read the timestamp from.
+        
+        if (difference < 1.5 && time != -999) {
             numberOfPhotosInBurst++;
             if (!burstHasStarted) burstHasStarted = true;
-            printf("[---]:   %s  %f %f  %s \n", previousPhoto.timeStamp.c_str(), difference, numberOfPhotosInBurst, previousPhoto.fileName.c_str());
+            photosToMove.push_back(previousPhoto);
+            
         } else {
+            // if the current photo in the interation didn't have a timestamp with a low difference, check to see if we
+            // were in a burst sequence. if so, break out and moves photos from the batch we collect
+            
             if (burstHasStarted) {
                 burstHasStarted = false;
+                photosToMove.push_back(previousPhoto);
+                
+                // because of my hyperactive photo taking activity, ensure this is a true burst and not me just tapping the capture button rapidly
+                
+                if (numberOfPhotosInBurst > 10) {
+                    for(std::vector<int>::size_type i = 0; i != photosToMove.size(); i++) {
+                        createBurstDirectoryAndMovePhoto(photosToMove[i], i, burstDirectoryStringStream);
+                    }
+                }
+                
                 numberOfPhotosInBurst = 0;
-                printf("[XXX]:   %s  %f %f  %s \n", previousPhoto.timeStamp.c_str(), difference, numberOfPhotosInBurst, previousPhoto.fileName.c_str());
+                burstDirectoryStringStream.str(string()); //clear the stringstream
+                photosToMove.clear();
             }
         }
-
         previousPhoto = photo;
+    }
+}
+
+void createBurstDirectoryAndMovePhoto(Photo &photo, unsigned long index, stringstream &burstDirectoryStringStream) {
+    
+    string basePath = "/Volumes/1TB Ext SSD 1/[iPhone bursts]/";
+    string sanitizedTimeStamp = sanitizedTimestamp(photo.timeStamp);
+    
+    path from = path(photo.fileName);
+    
+    // if this is the first photo from the burst, create a directory for it
+    if (index == 0) {
+        burstDirectoryStringStream << basePath << sanitizedTimeStamp.c_str();
+        path dir = path(burstDirectoryStringStream.str());
+        printf("***creating dir: %s\n", dir.c_str());
+        create_directories(dir);
+    }
+    
+    stringstream toPathStringStream;
+    toPathStringStream << burstDirectoryStringStream.str() << "/" << index << "_" << path(photo.fileName).filename().c_str();
+    
+    path to = path(toPathStringStream.str());
+    
+    rename(from, to);
+    
+    if (index == 0) {
+        copy_file(to,from);
     }
 }
 
@@ -152,7 +207,7 @@ void addPhoto(const char *fileName, EXIFInfo &result) {
     ss.str(photo.timeStamp);
     ss >> dateTimePhotoTaken;
     
-    if (dateTimePhotoTaken.to_string()  == "not-a-date-time") {
+    if (dateTimePhotoTaken.to_string() == "not-a-date-time") {
         photo.time_taken = -999;
     } else {
         time_duration durationSince1970 = dateTimePhotoTaken.utc_time() - (ptime)date(1970,1,1);
@@ -161,12 +216,11 @@ void addPhoto(const char *fileName, EXIFInfo &result) {
             photo.time_taken += (stod(result.SubSecTimeOriginal) / 1000.0);
         }
     }
-
     photos.push_back(photo);
 }
 
 void printExifInfo(const char *fileName, EXIFInfo &result) {
-
+    
     printf("Software          : %s\n", result.Software.c_str());
     printf("Image width       : %d\n", result.ImageWidth);
     printf("Image height      : %d\n", result.ImageHeight);
@@ -196,7 +250,20 @@ void printExifInfo(const char *fileName, EXIFInfo &result) {
     printf("----------------------------------------------------------------\n");
 }
 
-bool sortPhotoDate (Photo a, Photo b) {
+bool sortPhotoByDate (Photo a, Photo b) {
     return a.time_taken < b.time_taken;
 }
 
+string sanitizedTimestamp(string &timestamp) {
+    string from = ":";
+    string to = "-";
+    
+    if(timestamp.empty()) return "";
+    
+    size_t start_pos = 0;
+    while((start_pos = timestamp.find(from, start_pos)) != string::npos) {
+        timestamp.replace(start_pos, from.length(), to);
+        start_pos += to.length();
+    }
+    return string(timestamp);
+}
